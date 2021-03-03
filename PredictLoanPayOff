@@ -1,0 +1,102 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Loading the data and the information sheet
+df_info = pd.read_csv('DATA/lending_club_info.csv', index_col='LoanStatNew')
+df = pd.read_csv('DATA/lending_club_loan_two.csv')
+
+
+# Create a function that prints the info of each column
+def feat_info(col_name):
+    print(df_info.loc[col_name]['Description'])
+
+# Exploratory Data Analysis
+# Create count plot of the two groups of loan_status
+plt.figure()
+sns.countplot('loan_status', data=df)
+
+# Create a histogram of the loan_amnt 
+plt.figure()
+sns.histplot(df['loan_amnt'], bins=40)
+
+# Explore the correlation between continuous numerical variables
+corr_matrix = df.corr()
+f, ax = plt.subplots(figsize=(11, 15))
+heatmap = sns.heatmap(corr_matrix, square=True, linewidths=0.5,
+                      cmap='coolwarm', cbar_kws={'shrink': 0.4,
+                                                 'ticks': [-1, -.5, 0, .5, 1]},
+                      vmax=1, vmin=-1, annot=True, annot_kws={'size': 12})
+# add the column names as labels
+ax.set_yticklabels(corr_matrix.columns, rotation=0)
+ax.set_xticklabels(corr_matrix.columns)
+sns.set_style({'xtick.bottom': True}, {'ytick.left': True})
+
+# Visualize loan_status vs. loan_amnt and installment
+plt.figure()
+sns.scatterplot(x='loan_amnt', y='installment', data=df, hue='loan_status',
+                palette='Set1')
+plt.figure()
+sns.boxplot(x='loan_status', y='loan_amnt', data=df)
+
+df['loan_amnt'].groupby(by=df['loan_status']).describe()
+
+# evaluate the grade and sub-grade columns
+print(df['grade'].unique())
+print(df['sub_grade'].unique())
+
+df.sort_values(by=['sub_grade'], ascending=True, inplace=True)
+plt.figure(figsize=(18, 6))
+sns.countplot(x='sub_grade', data=df[df['loan_status'] == 'Fully Paid'],
+              palette='coolwarm')
+
+plt.figure(figsize=(12, 6))
+sns.countplot(x='sub_grade', data=df, hue='loan_status', palette='coolwarm')
+plt.figure()
+sns.countplot(x='sub_grade', data=df[df['sub_grade'] > 'E5'], hue='loan_status',
+              palette='coolwarm')
+
+
+# Create a binary column for loan_repaid to show 1 if loan was Fully Paid and 0 if Charged Off
+def loan_repaid(row):
+    if row['loan_status'] == 'Fully Paid':
+        return 1
+    elif row['loan_status'] == 'Charged Off':
+        return 0
+
+
+df['loan_repaid'] = df.apply(lambda row: loan_repaid(row), axis=1)
+print(df[['loan_repaid', 'loan_status']])
+
+# What is the correlation of this new column with the continuous columns of the data
+corr_loan_repaid = df.corr()['loan_repaid']
+corr_loan_repaid = corr_loan_repaid.sort_values().drop('loan_repaid')
+plt.figure()
+corr_loan_repaid.plot.bar(rot=0)
+
+# Missing Data
+df.isnull().sum()*100/len(df)
+plt.subplots(figsize=(10, 6))
+sns.heatmap(df.isnull(), yticklabels=False, cbar=False, cmap='viridis')
+
+# How many unique job titles are in our dataset?
+df['emp_title'].value_counts()
+df['emp_title'].nunique()
+# Too many unique job titles. We can't fill the missing info, drop the column
+df.drop(columns='emp_title', axis=1, inplace=True)  
+
+sorted(df['emp_length'].dropna().unique())
+emp_length_order = ['< 1 year', '1 year', '2 years', '3 years', '4 years',
+                    '5 years', '6 years', '7 years', '8 years', '9 years',
+                    '10+ years']
+sns.countplot(x='emp_length', data=df, order=emp_length_order)
+
+plt.figure()
+sns.countplot(x='emp_length', data=df, order=emp_length_order,
+              hue='loan_status')
+
