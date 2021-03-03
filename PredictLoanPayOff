@@ -2,12 +2,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+import random
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
 
-# Loading the data and the information sheet
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+
 df_info = pd.read_csv('DATA/lending_club_info.csv', index_col='LoanStatNew')
 df = pd.read_csv('DATA/lending_club_loan_two.csv')
 
@@ -16,16 +19,12 @@ df = pd.read_csv('DATA/lending_club_loan_two.csv')
 def feat_info(col_name):
     print(df_info.loc[col_name]['Description'])
 
-# Exploratory Data Analysis
-# Create count plot of the two groups of loan_status
+
 plt.figure()
 sns.countplot('loan_status', data=df)
-
-# Create a histogram of the loan_amnt 
 plt.figure()
 sns.histplot(df['loan_amnt'], bins=40)
 
-# Explore the correlation between continuous numerical variables
 corr_matrix = df.corr()
 f, ax = plt.subplots(figsize=(11, 15))
 heatmap = sns.heatmap(corr_matrix, square=True, linewidths=0.5,
@@ -37,7 +36,6 @@ ax.set_yticklabels(corr_matrix.columns, rotation=0)
 ax.set_xticklabels(corr_matrix.columns)
 sns.set_style({'xtick.bottom': True}, {'ytick.left': True})
 
-# Visualize loan_status vs. loan_amnt and installment
 plt.figure()
 sns.scatterplot(x='loan_amnt', y='installment', data=df, hue='loan_status',
                 palette='Set1')
@@ -45,8 +43,6 @@ plt.figure()
 sns.boxplot(x='loan_status', y='loan_amnt', data=df)
 
 df['loan_amnt'].groupby(by=df['loan_status']).describe()
-
-# evaluate the grade and sub-grade columns
 print(df['grade'].unique())
 print(df['sub_grade'].unique())
 
@@ -62,7 +58,6 @@ sns.countplot(x='sub_grade', data=df[df['sub_grade'] > 'E5'], hue='loan_status',
               palette='coolwarm')
 
 
-# Create a binary column for loan_repaid to show 1 if loan was Fully Paid and 0 if Charged Off
 def loan_repaid(row):
     if row['loan_status'] == 'Fully Paid':
         return 1
@@ -73,30 +68,154 @@ def loan_repaid(row):
 df['loan_repaid'] = df.apply(lambda row: loan_repaid(row), axis=1)
 print(df[['loan_repaid', 'loan_status']])
 
-# What is the correlation of this new column with the continuous columns of the data
 corr_loan_repaid = df.corr()['loan_repaid']
 corr_loan_repaid = corr_loan_repaid.sort_values().drop('loan_repaid')
 plt.figure()
 corr_loan_repaid.plot.bar(rot=0)
 
 # Missing Data
-df.isnull().sum()*100/len(df)
+df.isnull().sum() * 100 / len(df)
 plt.subplots(figsize=(10, 6))
 sns.heatmap(df.isnull(), yticklabels=False, cbar=False, cmap='viridis')
 
-# How many unique job titles are in our dataset?
 df['emp_title'].value_counts()
 df['emp_title'].nunique()
-# Too many unique job titles. We can't fill the missing info, drop the column
-df.drop(columns='emp_title', axis=1, inplace=True)  
+df.drop(columns='emp_title', axis=1, inplace=True)
 
 sorted(df['emp_length'].dropna().unique())
 emp_length_order = ['< 1 year', '1 year', '2 years', '3 years', '4 years',
                     '5 years', '6 years', '7 years', '8 years', '9 years',
                     '10+ years']
+plt.figure()
 sns.countplot(x='emp_length', data=df, order=emp_length_order)
 
 plt.figure()
 sns.countplot(x='emp_length', data=df, order=emp_length_order,
               hue='loan_status')
+emp_len_cnt = df.groupby(['emp_length'])['loan_status'].count()
+emp_len_cnt_CO = df[df['loan_status'] == 'Charged Off'].groupby(
+    'emp_length')['loan_status'].count()
 
+chargedoff_pct = (emp_len_cnt_CO / emp_len_cnt) * 100
+plt.figure()
+chargedoff_pct.plot.bar()
+
+# Pretty similar values across all emp_lengths. Drop the column
+df.drop('emp_length', axis=1, inplace=True)
+
+# Title and purpose columns provide similar data, drop title
+df.drop('title', axis=1, inplace=True)
+feat_info('mort_acc')
+df['mort_acc'].value_counts()
+mort_acc_corr = df.corr()['mort_acc'].sort_values()  # total_acc has the
+# highest correlation with this parameter
+
+totacc_mean = df.groupby('total_acc').mean()['mort_acc']
+df['mort_acc'] = df.apply(lambda row: totacc_mean.loc[row['total_acc']] if
+np.isnan(row['mort_acc']) else row['mort_acc'], axis=1)
+
+df.isnull().sum()
+
+# Drop the rest of missing data since it is less than 0.5% of the total data
+df.dropna(inplace=True)
+df.isnull().sum()
+
+# Encode categorical variables
+print(df.select_dtypes(exclude=['int64', 'float']).columns)
+df['term'].value_counts()
+df['term'] = df['term'].apply(lambda term: int(term[:3]))
+
+# Sub-grade already includes grade, drop grade
+df.drop('grade', inplace=True, axis=1)
+subgrade_Ddummies = pd.get_dummies(df['sub_grade'], drop_first=True)
+df = pd.concat([df.drop('sub_grade', axis=1), subgrade_Ddummies], axis=1)
+
+print(df.select_dtypes(['object']).columns)
+
+dummies = pd.get_dummies(df[['verification_status', 'application_type',
+                             'initial_list_status', 'purpose']],
+                         drop_first=True)
+df = pd.concat([df.drop(['verification_status', 'application_type',
+                         'initial_list_status', 'purpose'], axis=1), dummies],
+               axis=1)
+df['home_ownership'].value_counts()
+df['home_ownership'] = df['home_ownership'].replace(['NONE', 'ANY'], 'OTHER')
+dummies = pd.get_dummies(df['home_ownership'], drop_first=True)
+df = pd.concat([df.drop('home_ownership', axis=1), dummies], axis=1)
+
+print(df.select_dtypes(['object']).columns)
+df['zip_code'] = df['address'].apply(lambda address: int(address[-5:]))
+
+dummies = pd.get_dummies(df['zip_code'], drop_first=True)
+df = pd.concat([df.drop(['address', 'zip_code'], axis=1), dummies], axis=1)
+
+# Drop issue_d since we shouldn't know if loan was issued or not
+df = df.drop('issue_d', axis=1)
+
+# Extract the year for earliest credit line
+df['earliest_cr_year'] = pd.to_datetime(df['earliest_cr_line']).dt.year
+df.drop('earliest_cr_line', axis=1, inplace=True)
+df.drop('loan_status', axis=1, inplace=True)  # We created a duplicate
+# loan_repaind
+
+# plt.close('all')
+
+# Split Train and Test data
+X = df.drop('loan_repaid', axis=1)
+y = df['loan_repaid'].values
+
+# Grab a sample of 490k+ enteries to save time on training
+df = df.sample(frac=0.1, random_state=101)
+print(len(df))
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
+                                                    random_state=42)
+
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# Create the model
+model = Sequential()
+
+# input layer
+model.add(Dense(78, activation='relu'))  # Equal to the number of features in X
+model.add(Dropout(0.2))
+
+# hidden layer
+model.add(Dense(39, activation='relu'))
+model.add(Dropout(0.2))
+
+# hidden layer
+model.add(Dense(19, activation='relu'))
+model.add(Dropout(0.2))
+
+# output layer
+model.add(Dense(units=1, activation='sigmoid'))
+
+model.compile(loss='binary_crossentropy', optimizer='adam')
+
+# Fit the model to dataset
+model.fit(x=X_train, y=y_train, epochs=25, batch_size=256, validation_data=(
+    X_test, y_test))
+
+model.save('lendingClubModel.h5')  # Save the model
+
+# Evaluate model performance
+losses = pd.DataFrame(model.history.history)
+losses[['loss', 'val_loss']].plot()
+
+y_pred = model.predict_classes(X_test)
+
+print(classification_report(y_test, y_pred))
+print(confusion_matrix(y_test, y_pred))
+
+# Decide whether one costumer should get a loan
+random.seed(101)
+random_ind = random.randint(0, len(df))
+
+new_customer = df.drop('loan_repaid', axis=1).iloc[random_ind]
+
+print(model.predict_classes(new_customer.values.reshape(1, 78))[0][0])
+
+print(df.iloc[random_ind]['loan_repaid'])
